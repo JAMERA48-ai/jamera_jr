@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "api/spam.py", "use": "@vercel/python" }
+  ],
+  "routes": [
+    { "src": "/spam", "dest": "api/spam.py" }
+  ]
+}
