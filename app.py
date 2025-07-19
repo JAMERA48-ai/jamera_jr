@@ -1,4 +1,7 @@
-from flask import Flask, request, Response
+from flask import Request
+
+def handler(request: Request):
+    return app(request.environ, start_response=lambda status, headers: None)from flask import Flask, request, Response
 import requests
 import asyncio
 import httpx
@@ -136,5 +139,7 @@ def index():
     else:
         return "Please provide a valid ID."
 
-if __name__ == '__main__':
-    app.run(debug=True)
+from flask import Request
+
+def handler(request: Request):
+    return app(request.environ, start_response=lambda status, headers: None)
