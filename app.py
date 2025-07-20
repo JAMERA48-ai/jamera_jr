@@ -292,8 +292,11 @@ def main():
                 'bonus': c.bonus
             })
 
-    result['credit'] = '@Ujjaiwal'
+    result['credit'] = '@lnc_tomo'
     return jsonify(result)
 
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 8000))
+    log_info(f"Starting service on the port {port}")
+    app.run(host="0.0.0.0", port=port)
