@@ -1,203 +1,299 @@
-from flask import Flask, request, jsonify
-import requests
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
-import os
-import base64
-from datetime import datetime
-import time
-import my_pb2
-import output_pb2
+import binascii
+from flask import Flask, request, jsonify
+import requests
+import random
+import uid_generator_pb2
+from GetPlayerPersonalShow_pb2 import GetPlayerPersonalShow
+from secret import key, iv
 
 app = Flask(__name__)
-SESSION = requests.Session()
-KEY = bytes([89, 103, 38, 116, 99, 37, 68, 69, 117, 104, 54, 37, 90, 99, 94, 56])
-IV = bytes([54, 111, 121, 90, 68, 114, 50, 50, 69, 51, 121, 99, 104, 106, 77, 37])
 
-def log_info(message):
-    print(f"[INFO] {message}")
+def hex_to_bytes(hex_string):
+    return bytes.fromhex(hex_string)
 
-def log_error(message):
-    print(f"[ERROR] {message}")
+def create_protobuf(akiru_, aditya):
+    message = uid_generator_pb2.uid_generator()
+    message.akiru_ = akiru_
+    message.aditya = aditya
+    return message.SerializeToString()
 
-def log_debug(message):
-    print(f"[LOGS] {message}")
+def protobuf_to_hex(protobuf_data):
+    return binascii.hexlify(protobuf_data).decode()
 
-def getGuestAccessToken(uid, password):
-    headers = {
-        "Host": "100067.connect.garena.com",
-        "User-Agent": "GarenaMSDK/4.0.19P4(G011A ;Android 9;en;US;)",
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "close"
-    }
-    data = {
-        "uid": str(uid),
-        "password": str(password),
-        "response_type": "token",
-        "client_type": "2",
-        "client_secret": "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3",
-        "client_id": "100067"
-    }
-    response = SESSION.post("https://100067.connect.garena.com/oauth/guest/token/grant",
-                            headers=headers, data=data, verify=False)
-    data_response = response.json()
-    if data_response.get("success") is True:
-        resp = data_response.get("response", {})
-        if resp.get("error") == "auth_error":
-            return {"error": "auth_error"}
-    return {"access_token": data_response.get("access_token"), "open_id": data_response.get("open_id")}
+def decode_hex(hex_string):
+    byte_data = binascii.unhexlify(hex_string.replace(' ', ''))
+    users = GetPlayerPersonalShow()
+    users.ParseFromString(byte_data)
+    return users
 
-def check_guest(uid, password):
-    token_data = getGuestAccessToken(uid, password)
-    if token_data.get("error") == "auth_error":
-        return uid, None, None, True
-    access_token = token_data.get("access_token")
-    open_id = token_data.get("open_id")
-    if access_token and open_id:
-        log_debug(f"UID {uid}: Obtidos access_token e open_id via API")
-        return uid, access_token, open_id, False
-    log_error(f"UID {uid}: Falha no login, token ausente")
-    return uid, None, None, False
-
-def get_token_inspect_data(access_token):
-    try:
-        resp = SESSION.get(
-            f"https://100067.connect.garena.com/oauth/token/inspect?token={access_token}",
-            timeout=15,
-            verify=False
-        )
-        data = resp.json()
-        if 'open_id' in data and 'platform' in data and 'uid' in data:
-            return data
-    except Exception as e:
-        log_error(f"Erro ao inspecionar token: {e}")
-    return None
-
-def login(uid, access_token, open_id, platform_type):
-    log_debug(f"Iniciando login para UID {uid} com platform_type {platform_type}")
-    url = "https://loginbp.ggblueshark.com/MajorLogin"
-    game_data = my_pb2.GameData()
-    game_data.timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    game_data.game_name = "Free Fire"
-    game_data.game_version = 1
-    game_data.version_code = "1.111.1"
-    game_data.os_info = "iOS 18.4"
-    game_data.device_type = "Handheld"
-    game_data.network_provider = "Verizon Wireless"
-    game_data.connection_type = "WIFI"
-    game_data.screen_width = 1170
-    game_data.screen_height = 2532
-    game_data.dpi = "460"
-    game_data.cpu_info = "Apple A15 Bionic"
-    game_data.total_ram = 6144
-    game_data.gpu_name = "Apple GPU (5-core)"
-    game_data.gpu_version = "Metal 3"
-    game_data.user_id = uid
-    game_data.ip_address = "172.190.111.97"
-    game_data.language = "en"
-    game_data.open_id = open_id
-    game_data.access_token = access_token
-    game_data.platform_type = platform_type
-    game_data.field_99 = str(platform_type)
-    game_data.field_100 = str(platform_type)
-    serialized_data = game_data.SerializeToString()
-    padded_data = pad(serialized_data, AES.block_size)
-    cipher = AES.new(KEY, AES.MODE_CBC, IV)
+def encrypt_aes(hex_data, key, iv):
+    key = key.encode()[:16]
+    iv = iv.encode()[:16]
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    padded_data = pad(bytes.fromhex(hex_data), AES.block_size)
     encrypted_data = cipher.encrypt(padded_data)
-    headers = {
-        "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
-        "Connection": "Keep-Alive",
-        "Accept-Encoding": "gzip",
-        "Content-Type": "application/octet-stream",
-        "Expect": "100-continue",
-        "X-GA": "v1 1",
-        "X-Unity-Version": "2018.4.11f1",
-        "ReleaseVersion": "OB49",
-        "Content-Length": str(len(encrypted_data))
-    }
+    return binascii.hexlify(encrypted_data).decode()
+
+def get_credentials(region):
+    region = region.upper()
+    if region == "ME":
+        return "3814195836", "46045DFB48795D9EB2A231F4A40BC8832C5724117550E3C23A042625F3D83DBF"
+    elif region in ["ME", "BR", "SAC", "US"]:
+        return "uid", "password"
+    else:
+        return "uid", "password"
+
+def get_jwt_token(region):
+    uid, password = get_credentials(region)
+    jwt_url = f"https://jwt-tomo.vercel.app/api/get_jwt?guest_uid={uid}&guest_password={password}"
+    response = requests.get(jwt_url)
+    if response.status_code != 200:
+        return None
+    return response.json()
+
+@app.route('/player-info', methods=['GET'])
+def main():
+    uid = request.args.get('uid')
+    region = request.args.get('region')
+
+    if not uid or not region:
+        return jsonify({"error": "Missing 'uid' or 'region' query parameter"}), 400
+
     try:
-        response = SESSION.post(url, data=encrypted_data, headers=headers, timeout=30, verify=False)
-        if response.status_code == 200:
-            jwt_msg = output_pb2.Garena_420()
-            jwt_msg.ParseFromString(response.content)
-            if jwt_msg.token:
-                log_debug(f"Login bem-sucedido para UID {uid}, token: {jwt_msg.token[:10]}...")
-                return jwt_msg.token
-        else:
-            error_text = response.content.decode().strip()
-            log_debug(f"API MajorLogin retornou status {response.status_code}: {error_text}")
-            if error_text == "BR_PLATFORM_INVALID_PLATFORM":
-                return {"error": "INVALID_PLATFORM", "message": "this account is registered on another platform"}
-            elif error_text == "BR_GOP_TOKEN_AUTH_FAILED":
-                return {"error": "INVALID_TOKEN", "message": "AccessToken invalid."}
-            elif error_text == "BR_PLATFORM_INVALID_OPENID":
-                return {"error": "INVALID_OPENID", "message": "OpenID invalid."}
+        saturn_ = int(uid)
+    except ValueError:
+        return jsonify({"error": "Invalid UID"}), 400
+
+    jwt_info = get_jwt_token(region)
+    if not jwt_info or 'token' not in jwt_info:
+        return jsonify({"error": "Failed to fetch JWT token"}), 500
+
+    api = jwt_info['serverUrl']
+    token = jwt_info['token']
+
+    protobuf_data = create_protobuf(saturn_, 1)
+    hex_data = protobuf_to_hex(protobuf_data)
+    encrypted_hex = encrypt_aes(hex_data, key, iv)
+
+    headers = {
+        'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)',
+        'Connection': 'Keep-Alive',
+        'Expect': '100-continue',
+        'Authorization': f'Bearer {token}',
+        'X-Unity-Version': '2018.4.11f1',
+        'X-GA': 'v1 1',
+        'ReleaseVersion': 'OB49',
+        'Content-Type': 'application/x-www-form-urlencoded',
+    }
+
+    try:
+        response = requests.post(f"{api}/GetPlayerPersonalShow", headers=headers, data=bytes.fromhex(encrypted_hex))
+        response.raise_for_status()
+    except requests.RequestException:
+        return jsonify({"error": "Failed to contact game server"}), 502
+
+    hex_response = response.content.hex()
+
+    try:
+        users = decode_hex(hex_response)
     except Exception as e:
-        log_error(f"UID {uid}: Erro na requisição de JWT - {e}")
-    return None
+        return jsonify({"error": f"Failed to parse Protobuf: {str(e)}"}), 500
 
-@app.route("/api/get_jwt", methods=["GET"])
-def get_jwt():
-    guest_uid = request.args.get("guest_uid")
-    guest_password = request.args.get("guest_password")
-    if guest_uid and guest_password:
-        uid, access_token, open_id, err_flag = check_guest(guest_uid, guest_password)
-        if err_flag:
-            return jsonify({
-                "success": False,
-                "message": "invalid guest_uid, guest_password"
-            }), 400
-        if not access_token or not open_id:
-            return jsonify({
-                "success": False,
-                "message": "unregistered or banned account.",
-                "detail": "jwt not found in response."
-            }), 500
-        jwt_token = login(uid, access_token, open_id, 4)
-        if isinstance(jwt_token, dict):
-            return jsonify(jwt_token), 400
-        if not jwt_token:
-            return jsonify({
-                "success": False,
-                "message": "unregistered or banned account.",
-                "detail": "jwt not found in response."
-            }), 500
-        return jsonify({"success": True, "BearerAuth": jwt_token})
+    result = {}
 
-    access_token = request.args.get("access_token")
-    if access_token:
-        token_data = get_token_inspect_data(access_token)
-        if not token_data:
-            return jsonify({
-                "error": "INVALID_TOKEN",
-                "message": "AccessToken invalid."
-            }), 400
-        open_id = token_data["open_id"]
-        platform_type = token_data["platform"]
-        uid = str(token_data["uid"])
-        jwt_token = login(uid, access_token, open_id, platform_type)
-        if isinstance(jwt_token, dict):
-            return jsonify(jwt_token), 400
-        if not jwt_token:
-            return jsonify({
-                "success": False,
-                "message": "unregistered or banned account.",
-                "detail": "jwt not found in response."
-            }), 500
-        return jsonify({"success": True, "BearerAuth": jwt_token})
+    if users.players:
+        result['players'] = []
+        for p in users.players:
+            player_data = {
+                'user_id': p.user_id,
+                'account_status': p.account_status,
+                'username': p.username,
+                'country_code': p.country_code,
+                'level': p.level,
+                'experience': p.experience,
+                'clan_id': p.clan_id,
+                'title_id': p.title_id,
+                'matches_played': p.matches_played,
+                'kills': p.kills,
+                'daily_challenges': p.daily_challenges,
+                'current_avatar': p.current_avatar,
+                'main_weapon': p.main_weapon,
+                'cosmetic_skin': p.cosmetic_skin,
+                'last_login': p.last_login,
+                'rank': p.rank,
+                'skill_rating': p.skill_rating,
+                'headshot_percentage': p.headshot_percentage,
+                'current_rank': p.current_rank,
+                'clan_tag': p.clan_tag,
+                'join_date': p.join_date,
+                'game_version': p.game_version,
+                'email_verified': p.email_verified,
+                'phone_verified': p.phone_verified
+            }
+            
+            if p.HasField("subscription"):
+                player_data['subscription'] = {
+                    'tier': p.subscription.tier,
+                    'renewal_period': p.subscription.renewal_period
+                }
+                
+            if p.achievements:
+                player_data['achievements'] = []
+                for ach in p.achievements:
+                    achievement = {
+                        'achievement_id': ach.achievement_id,
+                        'progress': ach.progress,
+                        'details': {
+                            'objective_type': ach.details.objective_type,
+                            'target_value': ach.details.target_value,
+                            'current_value': ach.details.current_value,
+                            'reward_type': ach.details.reward_type,
+                            'reward_amount': ach.details.reward_amount
+                        } if ach.HasField("details") else None
+                    }
+                    player_data['achievements'].append(achievement)
+                    
+            if p.HasField("equipped"):
+                player_data['equipped_items'] = []
+                for slot in p.equipped.slots:
+                    player_data['equipped_items'].append({
+                        'slot_type': slot.slot_type,
+                        'item_id': slot.item_id,
+                        'variant': slot.variant
+                    })
+                    
+            if p.HasField("region"):
+                player_data['region'] = {
+                    'region_id': p.region.region_id,
+                    'ping': p.region.ping
+                }
+                
+            result['players'].append(player_data)
 
-    return jsonify({
-        "success": False,
-        "message": "missing access_token (or guest_uid + guest_password)"
-    }), 400
+    if users.clans:
+        result['clans'] = []
+        for c in users.clans:
+            clan_data = {
+                'clan_id': c.clan_id,
+                'member_count': c.member_count,
+                'status': c.status,
+                'permission_level': c.permission_level,
+                'creation_date': c.creation_date
+            }
+            if c.clan_logo:
+                clan_data['clan_logo'] = binascii.hexlify(c.clan_logo).decode()
+            if c.ranks:
+                clan_data['ranks'] = []
+                for rank in c.ranks:
+                    rank_data = {}
+                    if rank.HasField("custom_rank"):
+                        rank_data['custom_rank'] = rank.custom_rank
+                    if rank.HasField("standard_rank"):
+                        rank_data['standard_rank'] = rank.standard_rank
+                    clan_data['ranks'].append(rank_data)
+            result['clans'].append(clan_data)
 
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({"detail": "Not Found"}), 404
+    if users.titles:
+        result['titles'] = []
+        for t in users.titles:
+            result['titles'].append({
+                'title_id': t.title_id,
+                'title_name': t.title_name,
+                'unlock_requirement': t.unlock_requirement,
+                'rarity': t.rarity,
+                'usage_count': t.usage_count,
+                'category': t.category
+            })
+
+    if users.HasField("detailed_player"):
+        dp = users.detailed_player
+        detailed_player = {
+            'user_id': dp.user_id,
+            'account_status': dp.account_status,
+            'username': dp.username,
+            'country_code': dp.country_code,
+            'level': dp.level,
+            'experience': dp.experience,
+            'clan_id': dp.clan_id,
+            'title_id': dp.title_id,
+            'matches_played': dp.matches_played,
+            'kills': dp.kills,
+            'daily_challenges': dp.daily_challenges,
+            'current_avatar': dp.current_avatar,
+            'main_weapon': dp.main_weapon,
+            'cosmetic_skin': dp.cosmetic_skin,
+            'last_login': dp.last_login,
+            'rank': dp.rank,
+            'skill_rating': dp.skill_rating,
+            'headshot_percentage': dp.headshot_percentage,
+            'current_rank': dp.current_rank,
+            'clan_tag': dp.clan_tag,
+            'join_date': dp.join_date,
+            'game_version': dp.game_version,
+            'email_verified': dp.email_verified,
+            'phone_verified': dp.phone_verified
+        }
+        if dp.HasField("subscription"):
+            detailed_player['subscription'] = {
+                'tier': dp.subscription.tier,
+                'renewal_period': dp.subscription.renewal_period
+            }
+        result['detailed_player'] = detailed_player
+
+    if users.HasField("social"):
+        result['social'] = {
+            'friends_count': users.social.friends_count,
+            'friend_requests': users.social.friend_requests,
+            'max_friends': users.social.max_friends,
+            'blocked_count': users.social.blocked_count,
+            'favorite_friend': users.social.favorite_friend,
+            'preferred_region': users.social.preferred_region
+        }
+
+    if users.HasField("profile"):
+        result['profile'] = {
+            'user_id': users.profile.user_id,
+            'banner': users.profile.banner,
+            'bio': users.profile.bio,
+            'layout_style': users.profile.layout_style,
+            'custom_url': users.profile.custom_url
+        }
+
+    if users.HasField("settings"):
+        result['settings'] = {
+            'sensitivity': users.settings.sensitivity
+        }
+
+    if users.HasField("session"):
+        result['session'] = {
+            'current_streak': users.session.current_streak,
+            'session_start': users.session.session_start,
+            'session_end': users.session.session_end,
+            'match_count': users.session.match_count
+        }
+
+    if users.unlocks:
+        result['unlocks'] = []
+        for u in users.unlocks:
+            result['unlocks'].append({
+                'item_id': u.item_id,
+                'unlock_type': u.unlock_type
+            })
+
+    if users.currencies:
+        result['currencies'] = []
+        for c in users.currencies:
+            result['currencies'].append({
+                'currency_type': c.currency_type,
+                'amount': c.amount,
+                'max_capacity': c.max_capacity,
+                'bonus': c.bonus
+            })
+
+    result['credit'] = '@Ujjaiwal'
+    return jsonify(result)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    log_info(f"Starting service on the port {port}")
-    app.run(host="0.0.0.0", port=port)
-
+    app.run(host="0.0.0.0", port=5000)
