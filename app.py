@@ -296,7 +296,7 @@ def main():
     return jsonify(result)
 
 
+# في نهاية الملف
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    log_info(f"Starting service on the port {port}")
     app.run(host="0.0.0.0", port=port)
